@@ -1,0 +1,6 @@
+#add_subdirectory(plain)
+#add_subdirectory(newton)
+#add_subdirectory(float)
+#add_subdirectory(timetest)
+#add_subdirectory(carmack)
+add_subdirectory(euclid)
