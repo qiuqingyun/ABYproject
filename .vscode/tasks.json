@@ -6,7 +6,7 @@
         {
             "label": "C/C++: g++ build active file",
             "type": "shell",
-            "command": "cd /home/public/project/abyTimeTest/build && cmake .. && make "
+            "command": "cd /home/public/project/ABYproject/build && cmake .. && make "
         }
     ]
 }
