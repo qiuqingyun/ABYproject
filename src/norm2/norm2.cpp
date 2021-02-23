@@ -7,13 +7,13 @@
 #include <abycore/circuit/arithmeticcircuits.h>
 
 int32_t read_test_options(int32_t *argcp, char ***argvp, e_role *role,
-                          uint32_t *bitlen, uint32_t *numbers, uint32_t *secparam, std::string *address,
+                          uint32_t *bitlen, uint32_t *anss, uint32_t *secparam, std::string *address,
                           uint16_t *port, int32_t *test_op, uint32_t *nvals, uint32_t *rands)
 {
     uint32_t int_role = 0, int_port = 0;
     parsing_ctx options[] =
         {{(void *)&int_role, T_NUM, "r", "Role: 0/1", true, false},
-         {(void *)numbers, T_NUM, "n", "Number of elements for inner product, default: 128", false, false},
+         {(void *)anss, T_NUM, "n", "ans of elements for inner product, default: 128", false, false},
          {(void *)bitlen, T_NUM, "b", "Bit-length, default 16", false, false},
          {(void *)secparam, T_NUM, "s", "Symmetric Security Bits, default: 128", false, false},
          {(void *)address, T_STR, "a", "IP-address, default: localhost", false, false},
@@ -43,7 +43,7 @@ int32_t read_test_options(int32_t *argcp, char ***argvp, e_role *role,
     return 1;
 }
 
-share *sqrt(share *s_number, uint32_t bitlen, BooleanCircuit *bool_circ)
+share *sqrt(share *s_ans, uint32_t bitlen, BooleanCircuit *bool_circ)
 {
     const float zero = 0.0F;
     const float one = 1.0F;
@@ -65,11 +65,11 @@ share *sqrt(share *s_number, uint32_t bitlen, BooleanCircuit *bool_circ)
     share *s_mag = bool_circ->PutCONSGate(mag, bitlen);
 
     //判断数是否为零
-    share *s_isZero = bool_circ->PutFPGate(s_number, s_zero, CMP, bitlen, 1);
-    //x2=number*1.5
-    share *s_x2 = bool_circ->PutFPGate(s_number, s_zpf, MUL, bitlen, 1);
-    //y=number
-    share *s_y = s_number;
+    share *s_isZero = bool_circ->PutFPGate(s_ans, s_zero, CMP, bitlen, 1);
+    //x2=ans*1.5
+    share *s_x2 = bool_circ->PutFPGate(s_ans, s_zpf, MUL, bitlen, 1);
+    //y=ans
+    share *s_y = s_ans;
     //由于ABY中浮点数已经是32位整型表示，因此不用进行i  = * ( long * ) &y操作
     //(y >> 1)
     share *s_shiftedR = bool_circ->PutBarrelRightShifterGate(s_y, s_shiftN);
@@ -85,12 +85,12 @@ share *sqrt(share *s_number, uint32_t bitlen, BooleanCircuit *bool_circ)
         s_y = bool_circ->PutFPGate(s_temp_sub, s_y, MUL, bitlen, 1);                //y * ( threehalfs - ( x2 * y * y ) )
     }
 
-    share *s_out = bool_circ->PutFPGate(s_number, s_y, MUL, bitlen, 1);
+    share *s_out = bool_circ->PutFPGate(s_ans, s_y, MUL, bitlen, 1);
     return s_out;
 }
 
 int32_t euclid(e_role role, const std::string &address, uint16_t port, seclvl seclvl,
-               uint32_t numbers, uint32_t bitlen, uint32_t nthreads, e_mt_gen_alg mt_alg, uint32_t nvals, uint32_t rands)
+               uint32_t anss, uint32_t bitlen, uint32_t nthreads, e_mt_gen_alg mt_alg, uint32_t nvals, uint32_t rands)
 {
     ABYParty *party = new ABYParty(role, address, port, seclvl, bitlen, nthreads, mt_alg);
     std::vector<Sharing *> &sharings = party->GetSharings();
@@ -99,79 +99,62 @@ int32_t euclid(e_role role, const std::string &address, uint16_t port, seclvl se
     Circuit *yc = (Circuit *)sharings[S_YAO]->GetCircuitBuildRoutine();
 
     //根据维数测试数字
-    uint32_t a[nvals], b[nvals];
-    uint32_t c = 0, d = 0;
+    uint32_t x[nvals];
+    float plain[nvals];
+    float c = 0;
     srand(nvals * rands);
     std::cout << "nvals: " << nvals << std::endl;
     for (int i = 0; i < nvals; i++)
     {
-        a[i] = rand() % rands + 1;
-        b[i] = rand() % rands + 1;
-        std::cout << a[i] << " | " << b[i] << std::endl;
+        float temp = (rand() % rands) / 2.0;
+        std::cout << temp << " ";
+        plain[i] = temp;
+        x[i] = *(uint32_t *)&temp;
     }
-    //计算c和d
-    for (uint8_t i = 0; i < nvals; i++)
-    {
-        c += a[i] * a[i];
-        d += b[i] * b[i];
-    }
-    share *s_a_simd, *s_b_simd, *s_c, *s_d;
+    std::cout << std::endl;
+
+    share *s_x_simd, *s_cB;
     //输入电路
     if (role == SERVER)
-    {
-        s_a_simd = ac->PutSIMDINGate(nvals, a, bitlen, SERVER);
-        s_b_simd = ac->PutDummySIMDINGate(nvals, bitlen);
-        s_c = ac->PutINGate(c, bitlen, SERVER);
-        s_d = ac->PutDummyINGate(bitlen);
-    }
+        s_x_simd = bc->PutSIMDINGate(nvals, x, bitlen, SERVER);
     else
-    {
-        s_a_simd = ac->PutDummySIMDINGate(nvals, bitlen);
-        s_b_simd = ac->PutSIMDINGate(nvals, b, bitlen, CLIENT);
-        s_c = ac->PutDummyINGate(bitlen);
-        s_d = ac->PutINGate(d, bitlen, CLIENT);
-    }
+        s_x_simd = bc->PutDummySIMDINGate(nvals, bitlen);
     //计算欧氏距离
-    uint32_t zero = 0;
-    share *s_fiA = ac->PutMULGate(s_a_simd, s_b_simd);
+    share *s_ciB = bc->PutFPGate(s_x_simd, s_x_simd, MUL, bitlen, nvals);
 
-    s_fiA = ac->PutADDGate(s_fiA, s_fiA);
-    share *s_split = ac->PutSplitterGate(s_fiA);
-    share *s_fA = ac->PutCONSGate(zero, bitlen);
+    bc->PutPrintValueGate(s_ciB, "s_ciB");
+    //转换为算术电路
+    share *s_ciA = ac->PutB2AGate(s_ciB);
+    share *s_ciA_split = ac->PutSplitterGate(s_ciA);
+
+    s_cB = bc->PutCONSGate(c, bitlen);
+
     for (uint32_t i = 0; i < nvals; i++)
-        s_fA = ac->PutADDGate(s_split->get_wire_ids_as_share(i), s_fA);
-    share *s_eA = ac->PutADDGate(s_c, s_d);
-    s_eA = ac->PutSUBGate(s_eA, s_fA);
-
-    s_eA = ac->PutOUTGate(s_eA, ALL);
-    party->ExecCircuit();
-
-    //恢复为明文
-    uint32_t euclidDis1 = s_eA->get_clear_value<uint32_t>();
-
-    party->Reset();
-
-    //转换为浮点形式
-    float euclidDis1F = (float)euclidDis1;
-    uint32_t *euclidDisPtr = (uint32_t *)&euclidDis1F;
-    share *s_euclidDis2 = bc->PutCONSGate(euclidDisPtr, bitlen);
+    {
+        //先转换回布尔电路，再累加
+        share *s_ciA_split_temp = bc->PutA2BGate(s_ciA_split->get_wire_ids_as_share(i), yc);
+        s_cB = bc->PutFPGate(s_ciA_split_temp, s_cB, ADD, bitlen, 1);
+    }
 
     //开根号
-    s_euclidDis2 = sqrt(s_euclidDis2, bitlen, bc);
-    share *s_out = bc->PutOUTGate(s_euclidDis2, ALL);
+    share *s_norm = sqrt(s_cB, bitlen, bc);
+    share *s_out = bc->PutOUTGate(s_norm, ALL);
+    share *s_num = bc->PutOUTGate(s_cB, ALL);
 
     party->ExecCircuit();
 
     uint32_t *s_out_clear = (uint32_t *)s_out->get_clear_value_ptr();
     float s_out_clear_f = *((float *)s_out_clear);
+    uint32_t *s_num_clear = (uint32_t *)s_num->get_clear_value_ptr();
+    float s_num_clear_f = *((float *)s_num_clear);
 
-    uint32_t number = 0;
+    float ans = 0;
     for (uint8_t i = 0; i < nvals; i++)
-        number += (a[i] - b[i]) * (a[i] - b[i]);
+        ans += plain[i] * plain[i];
 
     std::cout << "---------------------------------------" << std::endl;
-    std::cout << "明文计算结果：√" << number << " = " << sqrt(number)
-              << "\n安全计算结果：√" << euclidDis1 << " = " << s_out_clear_f << std::endl;
+    std::cout << "明文计算结果：√" << ans << " = " << sqrt(ans)
+              << "\n安全计算结果：√" << s_num_clear_f << " = " << s_out_clear_f << std::endl;
     std::cout << "---------------------------------------\n"
               << std::endl;
 
@@ -182,17 +165,17 @@ int32_t euclid(e_role role, const std::string &address, uint16_t port, seclvl se
 int main(int argc, char **argv)
 {
     e_role role;
-    uint32_t bitlen = 32, numbers = 128, secparam = 128, nthreads = 1;
+    uint32_t bitlen = 32, anss = 128, secparam = 128, nthreads = 1;
     uint16_t port = 7766;
     std::string address = "127.0.0.1";
     int32_t test_op = -1;
     e_mt_gen_alg mt_alg = MT_OT;
     uint32_t nvals = 8;
-    uint32_t rands = 17;
-    read_test_options(&argc, &argv, &role, &bitlen, &numbers, &secparam, &address, &port, &test_op, &nvals, &rands);
+    uint32_t rands = 19;
+    read_test_options(&argc, &argv, &role, &bitlen, &anss, &secparam, &address, &port, &test_op, &nvals, &rands);
 
     seclvl seclvl = get_sec_lvl(secparam);
 
-    euclid(role, address, port, seclvl, numbers, bitlen, nthreads, mt_alg, nvals, rands);
+    euclid(role, address, port, seclvl, anss, bitlen, nthreads, mt_alg, nvals, rands);
     return 0;
 }

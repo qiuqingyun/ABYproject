@@ -8,7 +8,7 @@
             "name": "g++ - 生成和调试活动文件",
             "type": "cppdbg",
             "request": "launch",
-            "program": "/home/public/project/ABYproject/bin/euclid",
+            "program": "/home/public/project/ABYproject/bin/norm2",
             "args": ["-r","0"],
             "stopAtEntry": false,
             "cwd": "/home/public/project/ABYproject/bin/",
